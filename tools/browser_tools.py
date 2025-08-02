@@ -10,6 +10,16 @@ from langchain_groq import ChatGroq
 from crewai import LLM
 
 class WebsiteInput(BaseModel):
-    website: str = Field(..., description="THe website URL to scrape")
+    website: str = Field(..., description="The website URL to scrape")
 
-class BrowserTools(BaseModel)
+class BrowserTools(BaseTool):
+    name: str = "Scrape website content"
+    description: str = "Useful to scrape and summarize a website content"
+    args_schema: type[BaseModel] = WebsiteInput
+
+    def _run(self,website:str)-> str:
+        try:
+            url = f"https://chrome.browserless.io/content?token={st.secrets['BROWSERLESS_API_KEY']}"
+            payload = json.dumps({"url": website})
+            headers = {'cache-control': 'no-cache', 'content-type': 'application/json'}
+            response = requests.request("POST", url, headers=headers, data=payload)
