@@ -10,9 +10,11 @@ import os
 from dotenv import load_dotenv
 from functools import lru_cache
 
+# Load environment variables
 load_dotenv()
 
-app = FastAPI(title="VacAIgent API",
+app = FastAPI(
+    title="VacAIgent API",
     description="AI-powered travel planning API using CrewAI",
     version="1.0.0"
 )
@@ -25,7 +27,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 class TripRequest(BaseModel):
     origin: str = Field(..., 
@@ -43,20 +44,18 @@ class TripRequest(BaseModel):
     interests: str = Field(..., 
         example="2 adults who love swimming, dancing, hiking, shopping, local food, water sports adventures and rock climbing",
         description="Your interests and trip details")
-    
 
 class TripResponse(BaseModel):
     status: str
-    message : str
-    itinerary : Optional[str] = None
-    error : Optional[str] = None
+    message: str
+    itinerary: Optional[str] = None
+    error: Optional[str] = None
 
 class Settings:
     def __init__(self):
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
         self.SERPER_API_KEY = os.getenv("SERPER_API_KEY")
         self.BROWSERLESS_API_KEY = os.getenv("BROWSERLESS_API_KEY")
-
 
 @lru_cache()
 def get_settings():
@@ -68,9 +67,8 @@ def validate_api_keys(settings: Settings = Depends(get_settings)):
         'SERPER_API_KEY': settings.SERPER_API_KEY,
         'BROWSERLESS_API_KEY': settings.BROWSERLESS_API_KEY
     }
-
+    
     missing_keys = [key for key, value in required_keys.items() if not value]
-
     if missing_keys:
         raise HTTPException(
             status_code=500,
@@ -103,7 +101,6 @@ class TripCrew:
                 self.date_range
             )
 
-            
             gather_task = tasks.gather_task(
                 local_expert_agent,
                 self.origin,
@@ -118,9 +115,8 @@ class TripCrew:
                 self.date_range
             )
 
-
             crew = Crew(
-                agents = [
+                agents=[
                     city_selector_agent, local_expert_agent, travel_concierge_agent
                 ],
                 tasks=[identify_task, gather_task, plan_task],
@@ -128,21 +124,71 @@ class TripCrew:
             )
 
             result = crew.kickoff()
-
-            return result.raw if hasattr(result,'raw') else str(result)
+            # Convert CrewOutput to string and ensure it's properly formatted
+            return result.raw if hasattr(result, 'raw') else str(result)
         except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail=str(e)
             )
 
-
 @app.get("/")
 async def root():
-    return{
-        "message" : "welcome to VacAIgent Api",
-        "docs_url" : "/docs",
-        'redoc_url' : "/redoc"
+    return {
+        "message": "Welcome to VacAIgent API",
+        "docs_url": "/docs",
+        "redoc_url": "/redoc"
     }
 
-@app.post()
+@app.post("/api/v1/plan-trip", response_model=TripResponse)
+async def plan_trip(
+    trip_request: TripRequest,
+    settings: Settings = Depends(validate_api_keys)
+):
+    # Validate dates
+    if trip_request.end_date <= trip_request.start_date:
+        raise HTTPException(
+            status_code=400,
+            detail="End date must be after start date"
+        )
+
+    # Format date range
+    date_range = f"{trip_request.start_date} to {trip_request.end_date}"
+
+    try:
+        trip_crew = TripCrew(
+            trip_request.origin,
+            trip_request.destination,
+            date_range,
+            trip_request.interests
+        )
+        
+        itinerary = trip_crew.run()
+        
+        # Ensure itinerary is a string
+        if not isinstance(itinerary, str):
+            itinerary = str(itinerary)
+            
+        return TripResponse(
+            status="success",
+            message="Trip plan generated successfully",
+            itinerary=itinerary
+        )
+    
+    except Exception as e:
+        return TripResponse(
+            status="error",
+            message="Failed to generate trip plan",
+            error=str(e)
+        )
+
+@app.get("/api/v1/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat()
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
